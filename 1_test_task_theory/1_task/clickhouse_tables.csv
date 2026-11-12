@@ -1,0 +1,62 @@
+table,engine,rows,size_mb,partition_by,order_by,also_in_mariadb_replica
+prd_02,MergeTree,289278571,28476.0,toYYYYMM(time),"time, obj_id, id",no
+prd_01,MergeTree,693576945,8645.0,toYYYYMM(dt),"dt, endpoint, user_id, id",no
+mkt_01,MergeTree,24937872,3866.0,toYYYYMM(created_at),"created_at, user_id",yes
+prd_03,ReplacingMergeTree,153327251,3445.0,toYYYYMM(created_at),id,yes
+pay_08,ReplacingMergeTree,5381171,2463.0,toYYYYMM(paid_at),id,yes
+usr_01,ReplacingMergeTree,60485374,2072.0,toYYYYMM(created_at),id,yes
+prd_06,ReplacingMergeTree,37656246,1521.0,toYYYYMM(snapshot_date),id,yes
+prd_07,ReplacingMergeTree,32609096,1299.0,toYYYYMM(snapshot_date),id,no
+usr_06,ReplacingMergeTree,4834008,1137.0,toYYYYMM(expires_at),id,yes
+msg_01,MergeTree,60874967,1131.0,toYYYYMM(event_date),"event_date, user_id",yes
+prd_04,MergeTree,85378535,1123.0,toYYYYMM(dt),"endpoint, dt, user_id",no
+pay_03,ReplacingMergeTree,8698315,1098.0,toYYYYMM(created_at),id,yes
+prd_08,MergeTree,31716019,1027.0,toYYYYMM(valid_from),"valid_from, id",no
+pay_01,MergeTree,28668904,858.0,toYYYYMM(created_at),"created_at, user_id",yes
+mkt_03,ReplacingMergeTree,3126471,219.0,toYYYYMM(created_at),id,yes
+pay_07,ReplacingMergeTree,5574850,198.0,toYYYYMM(created_at),id,no
+prd_13,ReplacingMergeTree,6811015,184.0,toYYYYMM(dt),id,no
+usr_04,ReplacingMergeTree,4850233,180.0,toYYYYMM(created_at),id,yes
+usr_05,ReplacingMergeTree,4842423,176.0,toYYYYMM(created_at),id,yes
+prd_10,SummingMergeTree,13318385,140.0,toYYYYMM(date),"date, user_id",no
+mkt_02,ReplacingMergeTree,5013820,131.0,toYYYYMM(stat_date),id,yes
+prd_14,MergeTree,3856223,128.0,toYYYYMM(ts_1),"ts_1, obj_id",yes
+pay_06,ReplacingMergeTree,7185527,107.0,toYYYYMM(created_at),"created_at, id",no
+usr_03,MergeTree,4801185,102.0,toYYYYMM(created_at),"created_at, user_id",yes
+usr_11,ReplacingMergeTree,3128393,100.0,toYYYYMM(ts_1),uid,yes
+prd_15,MergeTree,3149462,81.0,toYYYYMM(created_at),"created_at, id",yes
+pay_10,MergeTree,1904472,53.0,toYYYYMM(time),"time, id",no
+mkt_04,MergeTree,2982650,45.0,toYYYYMM(created_at),"created_at, user_id",yes
+usr_08,ReplacingMergeTree,4623170,35.0,toYYYYMM(dt),user_id,yes
+prd_19,MergeTree,307784,18.0,toYYYYMM(created_at),"created_at, id",no
+pay_14,MergeTree,66600,14.0,toYYYYMM(created_at),"created_at, user_id",yes
+prd_20,ReplacingMergeTree,207818,9.0,toYYYYMM(dt),obj_id,yes
+prd_18,MergeTree,335272,8.0,toYYYYMM(created_at),"created_at, id",no
+mkt_07,MergeTree,566993,7.0,toYYYYMM(created_at),"created_at, id",yes
+pay_13,ReplacingMergeTree,87627,6.0,toYYYYMM(created_at),id,no
+mkt_apple_02,ReplacingMergeTree,73908,4.0,toYYYYMM(created_at),id,yes
+mkt_10,ReplacingMergeTree,144718,3.0,toYYYYMM(dt),id,yes
+mkt_yandex_01,ReplacingMergeTree,161743,3.0,toYYYYMM(created_at),id,yes
+prd_25,ReplacingMergeTree,33687,2.0,toYYYYMM(toDateTime(assumeNotNull(start))),"start, id",no
+pay_12,ReplacingMergeTree,151800,2.0,toYYYYMM(dt),id,no
+prd_27,MergeTree,24264,1.0,toYYYYMM(created_at),"created_at, id",yes
+mkt_msads_01,ReplacingMergeTree,20014,0.0,toYYYYMM(created_at),id,yes
+pay_19,ReplacingMergeTree,2978,0.0,toYYYYMM(ts),id,yes
+mkt_yandex_03,ReplacingMergeTree,6238,0.0,toYYYYMM(created_at),id,yes
+ref_03,MergeTree,315,0.0,,id,yes
+pay_22,MergeTree,47,0.0,toYYYYMM(created_at),"created_at, id",no
+svc_01,MergeTree,2213,0.0,toYYYYMM(date),"date, id",no
+usr_14,MergeTree,1293,0.0,,id,yes
+prd_37,MergeTree,35,0.0,toYYYYMM(created_at),"created_at, id",yes
+mkt_14,MergeTree,1391,0.0,,dt,yes
+prd_39,MergeTree,19,0.0,toYYYYMM(dt),"dt, id",yes
+mkt_18,MergeTree,206,0.0,toYYYYMM(created_at),"created_at, id",no
+ref_04,ReplacingMergeTree,233,0.0,,id,no
+pay_24,MergeTree,14,0.0,toYYYYMM(dt),"dt, id",yes
+mkt_19,MergeTree,35,0.0,toYYYYMM(created_at),"created_at, id",yes
+prd_38,MergeTree,28,0.0,,id,yes
+pay_23,MergeTree,32,0.0,,id,no
+usr_16,MergeTree,12,0.0,toYYYYMM(created_at),"created_at, id",yes
+prd_42,MaterializedView,,,,,no
+v_18,View,,,,,no
+v_19,View,,,,,no
