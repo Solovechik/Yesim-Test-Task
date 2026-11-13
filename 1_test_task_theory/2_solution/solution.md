@@ -119,7 +119,57 @@
     * *Purpose:* Pushing computed user segments, churn scores, or subscription statuses back into CRM/marketing platforms or product services.
     * *Execution:* Scheduled Airflow/dbt exports read finalized slices from gold marts and push updates via APIs or S3 exports, keeping operational databases decoupled from analytical workloads.
 * ***Consumer SLA & Data Contracts:***
-    * *Freshness Guarantee:* End consumers rely on predictable data freshness (aligned with the 4-hour MariaDB sync cadence and daily marketing rollups), backed by dbt source freshness checks and automated Slack/Telegram alerts if an upstream delay impacts gold table availability.
+    * *Purpose:* Ensuring predictable data availability and clear expectations for downstream business users.
+    * *Freshness Guarantee:* End consumers rely on predictable data freshness aligned with the 4-hour MariaDB sync cadence and daily marketing rollups, backed by `dbt source freshness` checks and automated Slack/Telegram alerts if an upstream delay impacts gold table availability.
+* ***Integrated dbt metadata layer & documentation site***
+    * *Purpose:* Empowers business analysts and data consumers with self-service discoverability, providing transparent definitions of metrics and table schemas without engineering bottlenecks.
+    * *Metadata Layer:* Enforcing explicit column descriptions, data owners, and business logic definitions directly in dbt `.yml` configuration files alongside transformation code.
+    * *Native Documentation:* Publishing an interactive web catalog via `dbt docs generate` linked to CI/CD pipelines, giving consumers immediate visibility into table lineage and freshness before querying the gold layer.
 
 
-# 5. Administration & Planning
+# 5. Administration, Governance & Planning
+##### Access Control & Schema Isolation (RBAC)
+**What:** Strict database-level RBAC enforcing namespace separation across bronze, silver, gold_agg, and gold.
+**Why:** Prevents business analysts and BI tools from accidentally querying raw ingestion logs (bronze) or unmerged AggregateFunction states (gold_agg), eliminating miscalculated metrics and heavy unoptimized full-table scans.
+**How:**
+* Grant read permissions strictly on the consumer-facing gold schema (mrt, dim, fct) for BI service accounts and analysts.
+* Revoke all visibility and access to bronze, silver, and internal pre-aggregation tables for non-engineering roles.
+* Enforce query resource quotas (max_memory_usage, max_execution_time) on ad-hoc user profiles to isolate production dbt pipelines from user query spikes.
+<br>
+
+##### PII Anonymization & Data Privacy
+**What:** Automated hashing and masking of PII before analytical exposure.
+**Why:** Ensures compliance with data privacy regulations and protects sensitive user identifiers extracted from operational tables from unauthorized exposure in downstream BI tools.
+**How:**
+* Identify PII fields (emails, IP addresses, phone numbers) during ingestion mapping.
+* Apply deterministic salting and SHA-256 hashing (or column-level masking) inside dbt transformations during the Bronze $\rightarrow$ Silver step, ensuring raw PII never reaches the gold layer while preserving joinability across user entities.
+<br>
+
+##### Disaster Recovery & Backup Strategy (S3-First Approach)
+**What:** Stateless, reproducible warehouse recovery relying on immutable S3 staging and declarative dbt code rather than traditional database snapshots.
+**Why:** Traditional ClickHouse file-level backups (clickhouse-backup) for multi-terabyte tables add storage bloat, network overhead, and operational complexity without adding value when raw data is already durably persisted.
+**How:**
+* All raw extractions from MariaDB, marketing APIs, and PostHog are stored as immutable Parquet files in S3 with bucket versioning and lifecycle policies enabled.
+* Because all Silver, gold_agg, and Gold transformations are version-controlled in dbt, any corrupted table or failed ClickHouse node can be cleanly rebuilt from scratch by re-running dbt incremental models against S3.
+* Lightweight automated backups are maintained solely for Airflow metadata DB, dbt artifacts, and ClickHouse DDL schemas/configs.
+<br>
+
+##### Implementation Roadmap (First 1–2 Months — Phase 1 MVP)
+**Weeks 1–2 — Infrastructure, S3 Staging & Bronze Layer:**
+* Provision S3 buckets, Apache Airflow.
+* Build idempotent Airflow extraction DAGs for MariaDB tables, prioritizing top-volume entities.
+* Deploy Bronze append-only MergeTree tables partitioned by month (toYYYYMM(dt)).
+
+**Weeks 3–4 — dbt Integration & Silver Layer:**
+* Configure dbt-clickhouse project structure and CI/CD pipelines.
+* Implement incremental Silver models using insert_overwrite, sliding window reloads, and memory-safe deduplication (argMax / LIMIT 1 BY id).
+* Configure dbt snapshot for critical SCD Type 2 business entities and set up baseline dbt tests (unique, not_null).
+
+**Weeks 5–6 — Gold Marts, Pre-Aggregations & RBAC:**
+* Build core star-schema dimensions, facts, and business marts in the gold schema (plus internal gold_agg rollups where needed).
+* Apply ClickHouse RBAC policies, PII masking rules, and connect BI tools (Superset / Metabase).
+
+**Weeks 7–8 — Observability, Alerting & Production Handover:**
+* Enable dbt source freshness monitors integrated with Slack/Telegram alerts for upstream ingestion delays.
+* Monitor ClickHouse system tables (`system.query_log`, `system.parts`) under real BI concurrency and tune memory/merge thresholds.
+* Finalize data catalog documentation and onboard analysts.
