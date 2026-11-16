@@ -1,0 +1,26 @@
+version: 2
+
+models:
+  - name: mrt_revenue
+    description: ''
+    columns:
+      - name: order_id
+        tests:
+          - unique
+          - not_null
+
+      - name: user_id
+        tests:
+          - not_null
+
+      - name: source
+        tests:
+          - not_null
+
+      - name: revenue_eur
+        tests:
+          - not_null
+
+      - name: gross_profit_eur
+        tests:
+          - not_null

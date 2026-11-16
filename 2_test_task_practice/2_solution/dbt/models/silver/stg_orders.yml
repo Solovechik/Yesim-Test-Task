@@ -1,0 +1,57 @@
+version: 2
+
+models:
+  - name: stg_orders
+    description: Raw user orders for subscription plans or services.
+    columns:
+      - name: id
+        description: Unique sequential identifier of the order (UInt64).
+        data_tests:
+          - unique
+          - not_null
+
+      - name: user_id
+        description: Identifier of the user who placed the order (UInt32).
+        data_tests:
+          - not_null
+
+      - name: payment_uid
+        description: Foreign key referencing payments.payment_uid. Nullable if the order was paid entirely with bonus points.
+        data_tests:
+          - relationships:
+              to: source('bronze', 'payments')
+              field: payment_uid
+              config:
+                where: 'payment_uid is not null'
+
+      - name: plan_id
+        description: Identifier of the purchased tariff or subscription plan (UInt32).
+        data_tests:
+          - not_null
+
+      - name: points_used
+        description: Number of loyalty or bonus points spent on the order (Int32).
+        data_tests:
+          - not_null
+
+      - name: platform
+        description: Client platform from which the order was placed.
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['web', 'ios', 'android']
+
+      - name: created_at
+        description: Timestamp when the order was created in the source system.
+        data_tests:
+          - not_null
+
+      - name: loaded_at
+        description: Technical timestamp indicating when the record was ingested into the bronze layer.
+        data_tests:
+          - not_null
+
+      - name: dt
+        description: Partition key representing the order date (YYYY-MM-DD).
+        data_tests:
+          - not_null

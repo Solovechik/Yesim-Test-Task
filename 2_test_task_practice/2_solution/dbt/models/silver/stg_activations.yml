@@ -1,0 +1,36 @@
+version: 2
+
+models:
+    - name: stg_activations
+      description: 'Cleaned activations table from the Bronze layer (S3) with deduplication via ReplacingMergeTree.'
+      columns:
+          - name: id
+            description: 'Unique activation identifier (PK).'
+            tests:
+                - unique
+                - not_null
+
+          - name: order_id
+            description: 'Identifier of the associated order.'
+            tests:
+                - not_null
+
+          - name: user_id
+            description: 'Identifier of the user.'
+            tests:
+                - not_null
+
+          - name: activated_at
+            description: 'Exact timestamp of package activation.'
+            tests:
+                - not_null
+
+          - name: dt
+            description: 'Activation date for monthly partitioning.'
+            tests:
+                - not_null
+
+          - name: loaded_at
+            description: 'Timestamp when data was loaded into Bronze.'
+            tests:
+                - not_null

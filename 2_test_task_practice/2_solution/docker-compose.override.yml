@@ -1,0 +1,83 @@
+services:
+  mariadb:
+    ports:
+      - '3307:3306'
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:26.10-alpine
+    container_name: clickhouse-server
+    restart: unless-stopped
+    ports:
+      - '8124:8123'
+      - '9001:9000'
+    env_file:
+      - ../2_solution/.env
+    environment:
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - ../2_solution/clickhouse/initdb:/docker-entrypoint-initdb.d:ro
+      - ../2_solution/clickhouse/users.d/z_collections.xml:/etc/clickhouse-server/users.d/z_collections.xml:ro
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:8123/ping']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  airflow:
+    image: apache/airflow:3.4.0
+    container_name: airflow-server
+    restart: unless-stopped
+    ports:
+      - '8080:8080'
+    entrypoint: ['/bin/bash', '/opt/airflow/entrypoint.sh']
+    env_file:
+      - ../2_solution/.env
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=SequentialExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=sqlite:////opt/airflow/airflow.db
+    volumes:
+      - ../2_solution/airflow/dags:/opt/airflow/dags
+      - ../2_solution/airflow/entrypoint.sh:/opt/airflow/entrypoint.sh:ro
+      - ../2_solution/pyproject.toml:/opt/airflow/pyproject.toml:ro
+      - ../2_solution/uv.lock:/opt/airflow/uv.lock:ro
+      - ../2_solution/dbt:/opt/airflow/dbt
+      - airflow_data:/opt/airflow
+    depends_on:
+      - clickhouse
+
+  minio:
+    image: alpine/minio:RELEASE.2025-10-15T17-29-55Z
+    container_name: minio-sandbox
+    user: root
+    ports:
+      - '9100:9000'
+      - '9101:9001'
+    environment:
+      MINIO_ROOT_USER: 'minioadmin'
+      MINIO_ROOT_PASSWORD: 'minioadmin'
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+
+  createbuckets:
+    image: amazon/aws-cli:latest
+    environment:
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
+      AWS_DEFAULT_REGION: us-east-1
+    entrypoint: >
+      /bin/sh -c "
+      aws --endpoint-url http://minio:9000 s3 mb s3://lakehouse || true;
+      exit 0;
+      "
+
+volumes:
+  clickhouse_data:
+  airflow_data:
+  minio_data:

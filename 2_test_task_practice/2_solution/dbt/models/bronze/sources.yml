@@ -1,0 +1,67 @@
+version: 2
+
+sources:
+  - name: bronze_s3
+    description: MariaDB data from S3.
+    schema: bronze
+
+    tables:
+      - name: orders
+        description: Raw orders.
+        columns:
+          - name: id
+            description: Unique sequential identifier of the order
+            data_type: UInt64
+
+          - name: user_id
+            description: Identifier of the user who placed the order
+            data_type: UInt32
+
+          - name: payment_uid
+            description: Foreign key referencing payments.payment_uid. Nullable if the order was paid entirely with bonus points.
+            data_type: UUID
+
+          - name: plan_id
+            description: Identifier of the purchased tariff or subscription plan
+            data_type: UInt32
+
+          - name: points_used
+            description: Number of loyalty or bonus points spent on the order
+            data_type: Int32
+
+          - name: platform
+            description: Platform from which the order was placed
+            data_type: Enum8
+
+          - name: created_at
+            description: Timestamp when the order was created
+            data_type: DateTime
+
+          - name: _loaded_at
+            description: Technical timestamp indicating when the record was ingested into the bronze layer.
+            data_type: DateTime
+
+          - name: dt
+            description: Partition key representing the order date (YYYY-MM-DD)
+            data_type: Date
+
+      - name: payments
+      # description + columns
+
+      - name: users
+      # description + columns
+
+      - name: plans
+      # description + columns
+
+      - name: activations
+      # description + columns
+
+      - name: usage_daily
+      # description + columns
+
+      - name: refunds
+      # description + columns
+
+      - name: payment_systems
+      # description + columns

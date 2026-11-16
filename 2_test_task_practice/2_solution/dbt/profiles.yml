@@ -1,0 +1,27 @@
+default:
+  define: &base_parameters
+    type: clickhouse
+    secure: False
+    host: clickhouse
+    port: 8123
+    user: etl_user
+    password: "{{ env_var('CH_ETL_PASSWORD') }}"
+    schema: dev
+
+  target: dev
+  outputs:
+    dev:
+      <<: *base_parameters
+      schema: dev
+
+    bronze:
+      <<: *base_parameters
+      schema: bronze
+
+    silver:
+      <<: *base_parameters
+      schema: silver
+
+    gold:
+      <<: *base_parameters
+      schema: gold
