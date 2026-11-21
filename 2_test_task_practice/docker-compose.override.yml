@@ -11,20 +11,20 @@ services:
       - '8124:8123'
       - '9001:9000'
     env_file:
-      - ../2_solution/.env
+      - .env
     environment:
       CLICKHOUSE_DB: default
       CLICKHOUSE_USER: default
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
     volumes:
       - clickhouse_data:/var/lib/clickhouse
-      - ../2_solution/clickhouse/initdb:/docker-entrypoint-initdb.d:ro
-      - ../2_solution/clickhouse/users.d/z_collections.xml:/etc/clickhouse-server/users.d/z_collections.xml:ro
+      - ./clickhouse/initdb:/docker-entrypoint-initdb.d:ro
+      - ./clickhouse/users.d/z_collections.xml:/etc/clickhouse-server/users.d/z_collections.xml:ro
     depends_on:
       mariadb:
         condition: service_healthy
     healthcheck:
-      test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:8123/ping']
+      test: ['CMD', 'wget', '-q', '-O', '-', 'http://localhost:8123/ping']
       interval: 5s
       timeout: 5s
       retries: 10
@@ -37,16 +37,16 @@ services:
       - '8080:8080'
     entrypoint: ['/bin/bash', '/opt/airflow/entrypoint.sh']
     env_file:
-      - ../2_solution/.env
+      - .env
     environment:
       - AIRFLOW__CORE__EXECUTOR=SequentialExecutor
       - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=sqlite:////opt/airflow/airflow.db
     volumes:
-      - ../2_solution/airflow/dags:/opt/airflow/dags
-      - ../2_solution/airflow/entrypoint.sh:/opt/airflow/entrypoint.sh:ro
-      - ../2_solution/pyproject.toml:/opt/airflow/pyproject.toml:ro
-      - ../2_solution/uv.lock:/opt/airflow/uv.lock:ro
-      - ../2_solution/dbt:/opt/airflow/dbt
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/entrypoint.sh:/opt/airflow/entrypoint.sh:ro
+      - ./pyproject.toml:/opt/airflow/pyproject.toml:ro
+      - ./uv.lock:/opt/airflow/uv.lock:ro
+      - ./dbt:/opt/airflow/dbt
       - airflow_data:/opt/airflow
     depends_on:
       - clickhouse
@@ -61,21 +61,34 @@ services:
     environment:
       MINIO_ROOT_USER: 'minioadmin'
       MINIO_ROOT_PASSWORD: 'minioadmin'
-    command: server /data --console-address ":9001"
+    command: server /data --console-address ':9001'
     volumes:
       - minio_data:/data
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'wget -q --spider http://localhost:9000/minio/health/live || exit 1',
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   createbuckets:
-    image: amazon/aws-cli:latest
+    image: amazon/aws-cli:2.42.1
+    container_name: create-buckets
     environment:
       AWS_ACCESS_KEY_ID: minioadmin
       AWS_SECRET_ACCESS_KEY: minioadmin
       AWS_DEFAULT_REGION: us-east-1
-    entrypoint: >
-      /bin/sh -c "
-      aws --endpoint-url http://minio:9000 s3 mb s3://lakehouse || true;
-      exit 0;
-      "
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: |
+      /bin/sh -c '
+      aws --endpoint-url http://minio:9000 s3 ls s3://lakehouse >/dev/null 2>&1 || \
+      aws --endpoint-url http://minio:9000 s3 mb s3://lakehouse
+      '
 
 volumes:
   clickhouse_data:
