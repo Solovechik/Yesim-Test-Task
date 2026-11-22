@@ -30,24 +30,24 @@ services:
       retries: 10
 
   airflow:
-    image: apache/airflow:3.4.0
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: de-test-part2-airflow:local
     container_name: airflow-server
     restart: unless-stopped
     ports:
       - '8080:8080'
-    entrypoint: ['/bin/bash', '/opt/airflow/entrypoint.sh']
     env_file:
       - .env
     environment:
-      - AIRFLOW__CORE__EXECUTOR=SequentialExecutor
-      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=sqlite:////opt/airflow/airflow.db
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS: "true"
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: sqlite:////opt/airflow/data/airflow.db
     volumes:
       - ./airflow/dags:/opt/airflow/dags
-      - ./airflow/entrypoint.sh:/opt/airflow/entrypoint.sh:ro
-      - ./pyproject.toml:/opt/airflow/pyproject.toml:ro
-      - ./uv.lock:/opt/airflow/uv.lock:ro
       - ./dbt:/opt/airflow/dbt
-      - airflow_data:/opt/airflow
+      - airflow_data:/opt/airflow/data
     depends_on:
       - clickhouse
 

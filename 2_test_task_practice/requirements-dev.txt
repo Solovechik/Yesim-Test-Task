@@ -1,0 +1,4 @@
+# Local dev only — keep in sync with [dependency-groups].dev in pyproject.toml.
+# In the Docker image Airflow comes from the base image, so this is NOT installed there.
+-r requirements.txt
+apache-airflow~=3.4.0
