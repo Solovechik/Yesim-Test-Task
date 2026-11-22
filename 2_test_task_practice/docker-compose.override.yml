@@ -3,6 +3,68 @@ services:
     ports:
       - '3307:3306'
 
+  redpanda:
+    image: redpandadata/redpanda:v24.2.4
+    container_name: redpanda
+    restart: unless-stopped
+    command:
+      - redpanda start
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr internal://redpanda:9092,external://localhost:19092
+      - --mode dev-container
+    ports:
+      - '19092:19092'
+    healthcheck:
+      test: ['CMD-SHELL', 'rpk cluster health | grep -q "Healthy:.*true"']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  debezium:
+    image: quay.io/debezium/connect:2.7.3.Final
+    container_name: debezium
+    restart: unless-stopped
+    depends_on:
+      mariadb:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    environment:
+      BOOTSTRAP_SERVERS: redpanda:9092
+      GROUP_ID: 1
+      CONFIG_STORAGE_TOPIC: my_connect_configs
+      OFFSET_STORAGE_TOPIC: my_connect_offsets
+      STATUS_STORAGE_TOPIC: my_connect_statuses
+      KEY_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      KEY_CONVERTER_SCHEMAS_ENABLE: "false"
+      VALUE_CONVERTER_SCHEMAS_ENABLE: "false"
+    ports:
+      - '8083:8083'
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:8083/connectors']
+      interval: 5s
+      timeout: 5s
+      retries: 15
+
+  debezium-init:
+    image: curlimages/curl:8.10.1
+    container_name: debezium-init
+    env_file:
+      - .env
+    depends_on:
+      debezium:
+        condition: service_healthy
+    volumes:
+      - ./debezium/connector.json:/connector.json.tpl:ro
+    entrypoint: |
+      /bin/sh -c '
+      awk -v pwd="$MARIADB_ROOT_PASSWORD" "{gsub(/__MARIADB_ROOT_PASSWORD__/, pwd); print}" /connector.json.tpl > /tmp/connector.json
+      /usr/bin/curl -s -o /dev/null -w "%{http_code}" http://debezium:8083/connectors/mariadb-app-connector | grep -q 200 || \
+      /usr/bin/curl -i -X POST -H "Accept:application/json" -H "Content-Type:application/json" \
+      http://debezium:8083/connectors/ -d @/tmp/connector.json
+      '
+
   clickhouse:
     image: clickhouse/clickhouse-server:26.10-alpine
     container_name: clickhouse-server
@@ -23,6 +85,10 @@ services:
     depends_on:
       mariadb:
         condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      createbuckets:
+        condition: service_completed_successfully
     healthcheck:
       test: ['CMD', 'wget', '-q', '-O', '-', 'http://localhost:8123/ping']
       interval: 5s

@@ -1,0 +1,29 @@
+{
+    "name": "mariadb-app-connector",
+    "config": {
+        "connector.class": "io.debezium.connector.mariadb.MariaDbConnector",
+        "database.hostname": "mariadb",
+        "database.port": "3306",
+        "database.user": "root",
+        "database.password": "__MARIADB_ROOT_PASSWORD__",
+        "database.ssl.mode": "disabled",
+        "driver.sslMode": "disable",
+        "database.server.id": "184061",
+        "topic.prefix": "app_cdc",
+        "database.include.list": "app",
+        "table.include.list": "app.users,app.plans,app.payment_systems,app.payments,app.orders,app.activations,app.usage_daily,app.refunds",
+        "snapshot.mode": "no_data",
+        "schema.history.internal.kafka.bootstrap.servers": "redpanda:9092",
+        "schema.history.internal.kafka.topic": "schemahistory.app",
+        "decimal.handling.mode": "double",
+        "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+        "key.converter.schemas.enable": "false",
+        "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+        "value.converter.schemas.enable": "false",
+        "transforms": "unwrap",
+        "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
+        "transforms.unwrap.drop.tombstones": "true",
+        "transforms.unwrap.delete.handling.mode": "rewrite",
+        "transforms.unwrap.add.fields": "op,source.ts_ms"
+    }
+}
