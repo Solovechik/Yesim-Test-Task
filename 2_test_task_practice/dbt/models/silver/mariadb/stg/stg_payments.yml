@@ -1,0 +1,21 @@
+version: 2
+
+models:
+  - name: stg_payments
+    description: 'Payments table from S3 and CDC systems.'
+    columns:
+      - name: payment_id
+
+      - name: payment_uuid
+
+      - name: user_id
+
+      - name: payment_system_id
+
+      - name: payment_status
+
+      - name: payment_amount_eur
+
+      - name: payment_created_at
+
+      - name: dt

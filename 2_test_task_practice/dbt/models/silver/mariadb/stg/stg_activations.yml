@@ -1,0 +1,15 @@
+version: 2
+
+models:
+  - name: stg_activations
+    description: 'Activations table from S3 and CDC systems.'
+    columns:
+      - name: activation_id
+
+      - name: order_id
+
+      - name: user_id
+
+      - name: activated_at
+
+      - name: dt

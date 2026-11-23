@@ -2,11 +2,12 @@ default:
   define: &base_parameters
     type: clickhouse
     secure: False
-    host: clickhouse
-    port: 8123
+    host: "{{ env_var('CH_ETL_HOST', 'clickhouse') }}"
+    port: "{{ env_var('CH_ETL_PORT', '8123') | as_number }}"
     user: etl_user
     password: "{{ env_var('CH_ETL_PASSWORD') }}"
     schema: dev
+    threads: 3
 
   target: dev
   outputs:

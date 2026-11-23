@@ -1,0 +1,100 @@
+version: 2
+
+models:
+  - name: fct_orders
+    description: >
+      Gold fact view of deduplicated, active orders filtered to exclude internal testers and staff.
+    columns:
+      - name: order_id
+        description: Primary unique identifier of the order.
+
+      - name: user_id
+        description: Foreign key referencing `dim_users`.
+
+      - name: payment_uuid
+        description: Payment transaction UUID (nullable for orders paid entirely with points).
+
+      - name: plan_id
+        description: Foreign key referencing `dim_plans`.
+
+      - name: order_points_used
+        description: Bonus points spent on the order.
+
+      - name: order_created_at
+        description: Timestamp when the order was created.
+
+  - name: fct_activations
+    description: >
+      Gold fact view of deduplicated, active plan activations.
+    columns:
+      - name: activation_id
+        description: Primary unique identifier of the activation.
+
+      - name: order_id
+        description: Foreign key referencing `fct_orders`.
+
+      - name: user_id
+        description: Foreign key referencing `dim_users`.
+
+      - name: activated_at
+        description: Timestamp when the activation occurred.
+
+  - name: fct_payments
+    description: >
+      Gold fact view of deduplicated, active payment transactions.
+    columns:
+      - name: payment_id
+        description: Primary unique identifier of the payment record.
+
+      - name: payment_uuid
+        description: Unique external UUID of the payment transaction.
+
+      - name: user_id
+        description: Foreign key referencing `dim_users`.
+
+      - name: payment_system_id
+        description: Foreign key referencing `dim_payment_systems`.
+
+      - name: payment_status
+        description: Status of the payment transaction.
+
+      - name: payment_amount_eur
+        description: Payment amount in EUR.
+
+      - name: payment_created_at
+        description: Timestamp when the payment was created.
+
+  - name: fct_refunds
+    description: >
+      Gold fact view of deduplicated, active payment refunds.
+    columns:
+      - name: refund_id
+        description: Primary unique identifier of the refund.
+
+      - name: payment_uuid
+        description: UUID of the refunded payment transaction.
+
+      - name: refund_amount_eur
+        description: Refunded amount in EUR.
+
+      - name: refund_created_at
+        description: Timestamp when the refund was created.
+
+  - name: fct_usage_daily
+    description: >
+      Gold fact view of deduplicated daily data usage and associated costs per activation.
+    columns:
+      - name: usage_id
+        description: Primary unique identifier of the daily usage record.
+
+      - name: activation_id
+        description: Foreign key referencing `fct_activations`.
+
+      - name: usage_date
+        description: Date of recorded usage.
+
+      - name: usage_units
+        description: Units of traffic consumed.
+
+      - name: usage_cost_eur
+        description: Cost of the usage in EUR.

@@ -1,0 +1,46 @@
+version: 2
+
+models:
+  - name: int_activations
+    description: >
+      Deduplicated and soft-delete-filtered activations table on MergeTree,
+      incrementally updated via partition overwrite from the raw ReplacingMergeTree model.
+    columns:
+      - name: activation_id
+        description: Primary unique identifier of the activation.
+        tests:
+          - not_null
+          - unique
+
+      - name: order_id
+        description: Foreign key referencing the associated order.
+        tests:
+          - not_null
+          - relationships:
+              to: ref('int_orders')
+              field: order_id
+              config:
+                severity: warn
+
+      - name: user_id
+        description: Identifier of the user who performed the activation.
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_users')
+              field: user_id
+
+      - name: activated_at
+        description: Timestamp when the activation occurred (used for monthly partitioning).
+        tests:
+          - not_null
+
+      - name: dt
+        description: Activation date derived from activated_at.
+        tests:
+          - not_null
+
+      - name: _version
+        description: Monotonic CDC version (`_offset + 1` for CDC events, `0` for historical batch rows). Used as an incremental watermark.
+        tests:
+          - not_null

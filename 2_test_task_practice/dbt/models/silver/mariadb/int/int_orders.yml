@@ -1,0 +1,57 @@
+version: 2
+
+models:
+  - name: int_orders
+    description: >
+      Deduplicated and soft-delete-filtered orders table on MergeTree,
+      incrementally updated via partition overwrite from the raw ReplacingMergeTree model.
+    columns:
+      - name: order_id
+        description: Primary unique identifier of the order.
+        tests:
+          - not_null
+          - unique
+
+      - name: user_id
+        description: Identifier of the user who placed the order.
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_users')
+              field: user_id
+
+      - name: payment_uuid
+        description: Unique UUID of the payment transaction associated with the order.
+
+      - name: plan_id
+        description: Identifier of the purchased subscription or tariff plan.
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_plans')
+              field: plan_id
+
+      - name: order_points_used
+        description: Number of bonus points spent on the order.
+        tests:
+          - not_null
+
+      - name: order_platform
+        description: Platform from which the order was created (e.g., web, ios, android).
+        tests:
+          - not_null
+
+      - name: order_created_at
+        description: Timestamp when the order was created (used for monthly partitioning).
+        tests:
+          - not_null
+
+      - name: dt
+        description: Order creation date derived from order_created_at.
+        tests:
+          - not_null
+
+      - name: _version
+        description: Monotonic CDC version (`_offset + 1` for CDC events, `0` for historical batch rows). Used as an incremental watermark.
+        tests:
+          - not_null

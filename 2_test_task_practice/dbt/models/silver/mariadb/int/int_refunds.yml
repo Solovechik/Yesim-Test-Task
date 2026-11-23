@@ -1,0 +1,43 @@
+version: 2
+
+models:
+  - name: int_refunds
+    description: >
+      Deduplicated and soft-delete-filtered refunds table on MergeTree,
+      incrementally updated via partition overwrite from the raw ReplacingMergeTree model.
+    columns:
+      - name: refund_id
+        description: Primary unique identifier of the refund.
+        tests:
+          - not_null
+          - unique
+
+      - name: payment_uuid
+        description: Unique UUID of the payment transaction being refunded.
+        tests:
+          - not_null
+          - relationships:
+              to: ref('int_orders') # замените на имя вашей очищенной модели заказов
+              field: payment_uuid
+              config:
+                severity: warn
+
+      - name: refund_amount_eur
+        description: Refunded amount in EUR (Decimal64 with 2 decimal places).
+        tests:
+          - not_null
+
+      - name: refund_created_at
+        description: Timestamp when the refund was created (used for monthly partitioning).
+        tests:
+          - not_null
+
+      - name: dt
+        description: Refund creation date derived from refund_created_at.
+        tests:
+          - not_null
+
+      - name: _version
+        description: Monotonic CDC version (`_offset + 1` for CDC events, `0` for historical batch rows). Used as an incremental watermark.
+        tests:
+          - not_null

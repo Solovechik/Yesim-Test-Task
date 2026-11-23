@@ -1,0 +1,19 @@
+version: 2
+
+models:
+  - name: stg_payment_systems
+    description: >
+      Reference dimension table of payment gateways and providers,
+      fully refreshed as a MergeTree table.
+    columns:
+      - name: payment_system_id
+        description: Primary unique identifier of the payment system.
+        tests:
+          - not_null
+          - unique
+
+      - name: payment_system_name
+        description: Human-readable name of the payment system/provider.
+        tests:
+          - not_null
+          - unique

@@ -1,0 +1,48 @@
+version: 2
+
+models:
+  - name: int_usage_daily
+    description: >
+      Deduplicated and soft-delete-filtered daily usage table on MergeTree,
+      incrementally updated via partition overwrite from the raw ReplacingMergeTree model.
+    columns:
+      - name: usage_id
+        description: Primary unique identifier of the daily usage record.
+        tests:
+          - not_null
+          - unique
+
+      - name: activation_id
+        description: Foreign key referencing the associated activation.
+        tests:
+          - not_null
+          - relationships:
+              to: ref('int_activations') # замените на имя вашей очищенной модели активаций
+              field: activation_id
+              config:
+                severity: warn
+
+      - name: usage_date
+        description: Date of the recorded usage (used for monthly partitioning).
+        tests:
+          - not_null
+
+      - name: usage_units
+        description: Number of units consumed on usage_date.
+        tests:
+          - not_null
+
+      - name: usage_cost_eur
+        description: Cost of the usage in EUR (Decimal64 with 2 decimal places).
+        tests:
+          - not_null
+
+      - name: dt
+        description: Partitioning and tracking date matching usage_date.
+        tests:
+          - not_null
+
+      - name: _version
+        description: Monotonic CDC version (`_offset + 1` for CDC events, `0` for historical batch rows). Used as an incremental watermark.
+        tests:
+          - not_null

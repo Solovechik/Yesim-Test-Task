@@ -1,0 +1,48 @@
+version: 2
+
+models:
+  - name: dim_users
+    description: >
+      Gold dimension view of valid users for analytics and reporting.
+      Excludes internal staff and QA tester accounts (`is_user_tester = 0` and `is_user_staff = 0`).
+    columns:
+      - name: user_id
+        description: Primary unique identifier of the user.
+
+      - name: user_country
+        description: Country associated with the user account.
+
+      - name: user_created_at
+        description: Timestamp when the user account was created.
+
+  - name: dim_plans
+    description: >
+      Gold dimension view of tariff and subscription plans.
+    columns:
+      - name: plan_id
+        description: Primary unique identifier of the tariff plan.
+
+      - name: plan_name
+        description: Human-readable name of the tariff plan.
+
+      - name: plan_size_gb
+        description: Included data allowance in gigabytes (nullable for unlimited plans).
+
+      - name: plan_days
+        description: Validity period of the plan in days.
+
+      - name: is_plan_unlimited
+        description: Flag indicating whether the plan has unlimited data (`1` = yes, `0` = no).
+
+      - name: price_eur
+        description: Retail price of the plan in EUR.
+
+  - name: dim_payment_systems
+    description: >
+      Gold dimension view of payment gateways and providers.
+    columns:
+      - name: payment_system_id
+        description: Primary unique identifier of the payment system.
+
+      - name: payment_system_name
+        description: Name of the payment system/provider.

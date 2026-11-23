@@ -1,0 +1,58 @@
+version: 2
+
+models:
+  - name: mrt_revenue
+    description: 'Data mart for revenue, returns, cost of goods sold, and cohort metrics'
+    columns:
+      - name: order_id
+        tests:
+          - unique
+          - not_null
+
+      - name: user_id
+        tests:
+          - not_null
+
+      - name: source
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['payment', 'points']
+
+      - name: paid_at
+        tests:
+          - not_null
+
+      - name: pdate
+        tests:
+          - not_null
+
+      - name: plan_category
+        tests:
+          - not_null
+          - accepted_values:
+              values:
+                [
+                  'unlim_short',
+                  'unlim_mid',
+                  'unlim_long',
+                  'small',
+                  'mid',
+                  'big',
+                ]
+
+      - name: revenue_eur
+        tests:
+          - not_null
+
+      - name: refund_eur
+        tests:
+          - not_null
+
+      - name: cogs_eur
+        tests:
+          - not_null
+
+      - name: gross_profit_eur
+        tests:
+          - not_null

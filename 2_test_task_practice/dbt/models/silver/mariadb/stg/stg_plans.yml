@@ -1,0 +1,39 @@
+version: 2
+
+models:
+  - name: stg_plans
+    description: >
+      Reference dimension table of tariff and subscription plans,
+      fully refreshed as a MergeTree table.
+    columns:
+      - name: plan_id
+        description: Primary unique identifier of the tariff plan.
+        tests:
+          - not_null
+          - unique
+
+      - name: plan_name
+        description: Human-readable title of the tariff plan.
+        tests:
+          - not_null
+
+      - name: plan_size_gb
+        description: Included data allowance in gigabytes (nullable for unlimited plans).
+
+      - name: plan_days
+        description: Validity period of the plan in days.
+        tests:
+          - not_null
+
+      - name: is_plan_unlimited
+        description: Boolean flag indicating whether the plan has unlimited data (1 = unlimited, 0 = capped).
+        tests:
+          - not_null
+          - accepted_values:
+              values: [0, 1]
+              quote: false
+
+      - name: price_eur
+        description: Retail price of the plan in EUR (Decimal32 with 2 decimal places).
+        tests:
+          - not_null

@@ -1,0 +1,21 @@
+version: 2
+
+models:
+  - name: stg_orders
+    description: 'Orders table from S3 and CDC systems.'
+    columns:
+      - name: order_id
+
+      - name: user_id
+
+      - name: payment_uuid
+
+      - name: plan_id
+
+      - name: order_points_used
+
+      - name: order_platform
+
+      - name: order_created_at
+
+      - name: dt

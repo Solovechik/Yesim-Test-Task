@@ -1,0 +1,21 @@
+version: 2
+
+sources:
+  - name: cdc
+    schema: cdc
+    tables:
+      - name: users
+
+      - name: plans
+
+      - name: payment_systems
+
+      - name: payments
+
+      - name: orders
+
+      - name: activations
+
+      - name: usage_daily
+
+      - name: refunds

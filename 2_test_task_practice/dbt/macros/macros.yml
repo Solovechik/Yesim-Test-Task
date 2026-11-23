@@ -1,0 +1,29 @@
+version: 2
+
+macros:
+  - name: generate_schema_name
+    description: >
+      Overrides dbt's default schema naming so custom schemas (e.g. `bronze`, `silver`, `gold`)
+      are used verbatim without prefixing `target.schema`.
+    arguments:
+      - name: custom_schema_name
+        type: string
+        description: Custom schema name configured on the model or folder.
+      - name: node
+        type: Node
+        description: dbt node currently being compiled.
+
+  - name: get_cdc_watermarks
+    description: >
+      Retrieves incremental high-water marks (the latest CDC version and the latest batch timestamp)
+      from the target relation to identify affected partitions in hybrid batch + CDC pipelines.
+    arguments:
+      - name: relation
+        type: Relation
+        description: The target incremental dbt relation (`{{ this }}`) to query current watermarks from.
+      - name: version_col
+        type: string
+        description: Name of the monotonic CDC version column (defaults to `'_version'`).
+      - name: batch_dt_col
+        type: string
+        description: Name of the date or timestamp column used to track incremental progress for batch records (`_version = 0`).

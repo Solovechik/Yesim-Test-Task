@@ -1,0 +1,39 @@
+version: 2
+
+models:
+  - name: stg_users
+    description: >
+      Dimension table of registered users, including country and internal account flags
+      (testers and staff), fully refreshed as a MergeTree table.
+    columns:
+      - name: user_id
+        description: Primary unique identifier of the user.
+        tests:
+          - not_null
+          - unique
+
+      - name: user_country
+        description: Country code or name associated with the user account.
+        tests:
+          - not_null
+
+      - name: is_user_tester
+        description: Boolean flag indicating whether the user is a QA/internal tester (1 = yes, 0 = no).
+        tests:
+          - not_null
+          - accepted_values:
+              values: [0, 1]
+              quote: false
+
+      - name: is_user_staff
+        description: Boolean flag indicating whether the user is an internal staff member (1 = yes, 0 = no).
+        tests:
+          - not_null
+          - accepted_values:
+              values: [0, 1]
+              quote: false
+
+      - name: user_created_at
+        description: Timestamp when the user account was created.
+        tests:
+          - not_null
