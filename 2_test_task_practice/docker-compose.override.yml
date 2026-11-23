@@ -37,8 +37,8 @@ services:
       STATUS_STORAGE_TOPIC: my_connect_statuses
       KEY_CONVERTER: org.apache.kafka.connect.json.JsonConverter
       VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
-      KEY_CONVERTER_SCHEMAS_ENABLE: "false"
-      VALUE_CONVERTER_SCHEMAS_ENABLE: "false"
+      KEY_CONVERTER_SCHEMAS_ENABLE: 'false'
+      VALUE_CONVERTER_SCHEMAS_ENABLE: 'false'
     ports:
       - '8083:8083'
     healthcheck:
@@ -108,14 +108,20 @@ services:
       - .env
     environment:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
-      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS: "true"
+      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS: 'true'
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: sqlite:////opt/airflow/data/airflow.db
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'false'
+      AIRFLOW__CORE__PARALLELISM: '2'
+      AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG: '2'
     volumes:
       - ./airflow/dags:/opt/airflow/dags
       - ./dbt:/opt/airflow/dbt
       - airflow_data:/opt/airflow/data
     depends_on:
-      - clickhouse
+      clickhouse:
+        condition: service_healthy
+      debezium-init:
+        condition: service_completed_successfully
 
   minio:
     image: alpine/minio:RELEASE.2025-10-15T17-29-55Z

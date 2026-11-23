@@ -95,7 +95,7 @@ create table if not exists cdc.plans
     id           UInt32,
     name         String,
     size_gb      Nullable(Decimal(6, 1)),
-    days         Int32,
+    days         UInt32,
     is_unlimited UInt8,
     price_eur    Decimal(10, 2),
     _version     UInt64,
@@ -110,7 +110,7 @@ create table if not exists cdc.plans_kafka
     id             UInt32,
     name           String,
     size_gb        Nullable(Float64),
-    days           Int32,
+    days           UInt32,
     is_unlimited   UInt8,
     price_eur      Float64,
     __deleted      String
@@ -152,7 +152,7 @@ create table if not exists cdc.plans_s3_sink
     id UInt32,
     name String,
     size_gb Nullable(Decimal(6, 1)),
-    days Int32,
+    days UInt32,
     is_unlimited UInt8,
     price_eur Decimal(10, 2),
     _version UInt64,
@@ -345,7 +345,7 @@ create table if not exists cdc.orders
     user_id     UInt32,
     payment_uid Nullable(String),
     plan_id     UInt32,
-    points_used Int32,
+    points_used UInt32,
     platform    LowCardinality(String),
     created_at  DateTime('UTC'),
     _version    UInt64,
@@ -361,7 +361,7 @@ create table if not exists cdc.orders_kafka
     user_id        UInt32,
     payment_uid    Nullable(String),
     plan_id        UInt32,
-    points_used    Int32,
+    points_used    UInt32,
     platform       String,
     created_at     Int64,
     __deleted      String
@@ -405,7 +405,7 @@ create table if not exists cdc.orders_s3_sink
     user_id UInt32,
     payment_uid Nullable(String),
     plan_id UInt32,
-    points_used Int32,
+    points_used UInt32,
     platform String,
     created_at DateTime('UTC'),
     _version UInt64,
@@ -515,7 +515,7 @@ create table if not exists cdc.usage_daily
     id            UInt64,
     activation_id UInt64,
     usage_date    Date,
-    usage_units   Int32,
+    usage_units   UInt32,
     cost_eur      Decimal(10, 2),
     _version      UInt64,
     _is_deleted   UInt8
@@ -528,8 +528,8 @@ create table if not exists cdc.usage_daily_kafka
 (
     id             UInt64,
     activation_id  UInt64,
-    usage_date     Int32,
-    usage_units    Int32,
+    usage_date     UInt32,
+    usage_units    UInt32,
     cost_eur       Float64,
     __deleted      String
 )
@@ -569,7 +569,7 @@ create table if not exists cdc.usage_daily_s3_sink
     id UInt64,
     activation_id UInt64,
     usage_date Date,
-    usage_units Int32,
+    usage_units UInt32,
     cost_eur Decimal(10, 2),
     _version UInt64,
     _is_deleted UInt8

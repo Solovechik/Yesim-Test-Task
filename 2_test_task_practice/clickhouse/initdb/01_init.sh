@@ -53,5 +53,9 @@ clickhouse client -n <<-EOSQL
     GRANT SELECT, INSERT, ALTER, CREATE TABLE, DROP TABLE, TRUNCATE ON bronze.* TO etl_role;
     GRANT SELECT, INSERT, ALTER, CREATE TABLE, DROP TABLE, TRUNCATE ON silver.* TO etl_role;
     GRANT SELECT, INSERT, ALTER, CREATE TABLE, DROP TABLE, TRUNCATE ON gold.* TO etl_role;
+    GRANT SELECT ON cdc.* TO etl_role;
+    GRANT SELECT ON system.parts TO etl_user;
+    GRANT SELECT ON system.tables TO etl_user;
+    GRANT SELECT ON system.columns TO etl_user;
     GRANT CREATE VIEW, DROP VIEW ON gold.* TO etl_role;
 EOSQL
