@@ -1,116 +1,142 @@
-# ELT-пайплайн построения витрины доходов (`mrt_revenue`)
+# ELT-пайплайн построения витрины доходов (`gold.mrt_revenue`)
 
-Репозиторий содержит код ELT-пайплайна (MariaDB → S3/Bronze → ClickHouse Silver/Gold) с оркестрацией в Apache Airflow и трансформациями на dbt.
+Репозиторий содержит код гибридного ELT-пайплайна (MariaDB → S3/Bronze + Debezium/Redpanda CDC → ClickHouse Silver/Gold) с оркестрацией в Apache Airflow и трансформациями на dbt.
 
 ---
 
 ## 1. Запуск
 
-Стенд полностью воспроизводим из коробки. Вся инициализация баз данных, пользователей, прав и таблиц выполняется идемпотентно:
+Стенд воспроизводим из коробки: инициализация баз, пользователей, прав, таблиц, бакетов и DAG-ов выполняется идемпотентно.
 
 #### Docker
 ```bash
-# 1. Поднятие чистой инфраструктуры (Docker + DDL баз, ролей и таблиц)
-make up
-
-# 2. Полный сброс
-make reset
+make up           # чистая инфраструктура (Docker + DDL баз, ролей, таблиц + креды из .env)
+make next         # следующий пакет изменений в MariaDB (всего 6 пакетов по 4 часа)
+make status       # текущий номер пакета
+make trigger-dags # ручной прогон пайплайна (без ожидания расписания)
+make dbt-build    # сборка всех dbt-моделей вручную (silver + gold)
+make dbt-docs     # генерация и раздача dbt-документации
+make reset        # полный сброс стенда
 ```
+
+После `make up` / `make reset` начальный прогон (`state0`) стартует в Airflow автоматически; далее для имитации суток: `make next` → `make trigger-dags` (повторить 6 раз).
+
 
 #### Web Interface
 ##### Airflow
-http://localhost:8080 - `login: admin, password: <via docker logs>`
-1. Получение пароля от Airflow (если нет пароля - контейнер ещё не стартанул):
-    ```
-    docker logs airflow-server 2>&1 | grep "Password for user 'admin'"
-    ```
-2. Запуск дагов - `mariadb_to_s3_daily -> mariadb_to_s3_4h -> mrt_revenue_pipeline`
+http://localhost:8080 — вход без пароля: включён; все пользователи считаются админами.
+
+DAG-и связаны через Airflow Assets, а не через сдвиг расписания:
+* `mariadb_to_s3_dimensions` (`0 */4 * * *`) → outlet `MARIA_DIMENSIONS_ASSET` (сигнал готовности);
+* `mariadb_to_s3_events` (`0 */4 * * *`) → outlet `MARIA_EVENTS_ASSET` (сигнал готовности);
+* `mrt_revenue_pipeline` — asset-based расписание `MARIA_EVENTS_ASSET & MARIA_DIMENSIONS_ASSET`, стартует сразу после готовности обоих источников.
 
 ##### Clickhouse
-http://localhost:8124/play - `login: default, password: admin_pass`
+http://localhost:8124/play — `login: default, password: admin_pass`
 ##### Minio
-http://localhost:9101 `login: minioadmin, password: minioadmin`
-1. Выбрать пресозданный бакет со скачанными из MariaDB данными
+http://localhost:9101 — `login: minioadmin, password: minioadmin`, бакет `lakehouse` с выгруженными из MariaDB батчами.
+##### dbt Docs
+http://localhost:8081 (если запускаете через make dbt-docs)
 
 ---
 
-## 2. Пользователи и права, движки таблиц, слои
+## 2. Слои, движки таблиц, пользователи и права
 
 ### Слои данных (Medallion Architecture)
-* **`bronze` (Raw Layer):** Сырые данные, выгруженные из реплики MariaDB в S3/MinIO и подключенные/загруженные в ClickHouse с техническим полем `loaded_at`.
-* **`silver` (Staging Layer):** Очищенные и типизированные представления/таблицы (`stg_*`).
-* **`gold` (Mart Layer):** Бизнес-витрины (`mrt_revenue`), готовые для BI и продуктовой аналитики.
+* **`bronze` — Raw Layer.** Два источника:
+  * `bronze.src_*` — `S3()`-таблицы поверх parquet-батчей из MinIO (историческая/регулярная выгрузка);
+  * `bronze.cdc.*` — Kafka Engine + Materialized View, принимающие поток Debezium в формате JSON (upsert + soft-delete).
+  Технические поля: `_version`, `_is_deleted`, `dt` (дата партиции S3-батча или дата события для CDC). Отдельной колонки `batch_dt` нет — водораздел батча в макросе `get_cdc_watermarks` считается по событийной дате конкретной таблицы (`payment_created_at`, `order_created_at`, `activated_at`, `refund_created_at`, `usage_date`).
 
-### Движки таблиц и партиционирование
-* **Bronze-таблицы:** `S3()` для передачи запросов от silver слоя и пруннинга партов прямо в S3.
-* **Silver-таблицы:** `MergeTree()` / `ReplacingMergeTree` с сортировкой по первичным ключам источника для быстрого чтения.
-* **Gold-витрина (`mrt_revenue`):** `MergeTree()`, партиционирование по месяцам `PARTITION BY toYYYYMM(pdate)`, ключ сортировки `ORDER BY (pdate, user_id, order_id)`. Это обеспечивает быстрый pruning партиций при фильтрации по датам и эффективное сжатие.
+* **`silver.stg_*` — Staging.** `ReplacingMergeTree(_version, _is_deleted)` (либо эквивалент с партиционированием): в одну таблицу сливаются **оба** потока. Приоритет задан версией: у S3-батча `_version = 0`, у CDC-события `_version = _offset + 1`. Мягкое удаление из Debezium (`__deleted`) превращается в `_is_deleted = 1`. Здесь дешёвая дедупликация на уровне движка — без чтения через `FINAL`.
+* **`silver.int_*` — Dedupe / Enrichment.** `MergeTree()`, материализуется dbt-моделями (`int_payments`, `int_orders`, `int_activations`, `int_refunds`, `int_usage_daily`) стратегией `insert_overwrite` **только по затронутым месячным партициям**. Реальная дедупликация и фильтрация удалённых строк выполняются здесь один раз, а не в золотом слое.
+* **`gold` — Mart Layer.** `dim_*`, `fct_*`, `mrt_revenue` читают `silver.int_*` напрямую: **`FINAL` не используется**, gold не тратит ресурсы на дедупликацию при чтении.
+
+### Инкрементальность silver/gold
+Ключевой макрос — `get_cdc_watermarks` (Jinja): он отслеживает **оба** водораздела — `max(_version)` (CDC) и `max(<event_dt>)` при `_version = 0` (S3-батчи, где `<event_dt>` — событийная дата конкретной таблицы: `payment_created_at`, `order_created_at`, `activated_at`, `refund_created_at`, `usage_date`). По ним вычисляются партиции, которые реально могли измениться, и перезаписываются через `insert_overwrite`. Поэтому повторный запуск идемпотентен, а полного перечтения больших таблиц нет.
+
+### Движки и партиционирование
+* **Bronze:** `S3()` для пруннинга прямо в S3; `Kafka()` + `Materialized View` для CDC.
+* **Silver:** `ReplacingMergeTree(_version, _is_deleted)` в `stg_*`; `MergeTree()` в `int_*` с сортировкой по ключам источника.
+* **Gold:** `MergeTree()`, у `mrt_revenue` — `PARTITION BY toYYYYMM(pdate)`, `ORDER BY (pdate, user_id, order_id)`: быстрый pruning партиций по датам и эффективное сжатие.
 
 ### Пользователи и права (RBAC)
-Доступ разграничен по принципу минимальных привилегий (DDL в `clickhouse/initdb/01_init.sh`):
-* `etl_user`: полные права - `CREATE`, `INSERT`, `SELECT`, `DROP`,`ALTER TABLE ... DROP/REPLACE PARTITION, полные права на `bronze`, `silver` и `gold`.
-* `analyst_user`: права строго `SELECT` только на схему `gold`.
+Минимальные привилегии, DDL в `clickhouse/initdb/01_init.sh`:
+* `etl_user`: `CREATE`, `INSERT`, `SELECT`, `DROP`, `ALTER TABLE ... DROP/REPLACE PARTITION` на `bronze`, `silver`, `gold`, а также `SELECT ON system.parts`, `system.tables`, `system.columns` — без чтения системных таблиц dbt-clickhouse не может строить список партиций для `insert_overwrite`.
+* `analyst_user`: строго `SELECT` только на схему `gold`.
 
 ---
 
 ## 3. Стратегии загрузки таблиц
 
-Выгрузка в Airflow (`0 */4 * * *`) разделена на три стратегии в зависимости от бизнес-логики и объема таблиц:
+Выгрузка разделена на две группы.
 
-1. **Полная перезапись (Full Refresh / Truncate + Insert):**
-   * **Таблицы:** `users`, `plans`, `payment_systems`.
-   * **Почему:** Небольшие справочники, где записи могут редактироваться задним числом (например, проставление флагов `is_tester` / `is_staff` у пользователей или изменение параметров тарифа) без надежного поля `updated_at`.
-2. **Инкрементальная загрузка со скользящим окном (Sliding Window Overwrite):**
-   * **Таблицы:** `orders`, `activations`, `usage_daily`, `payments`, `refunds`.
-   * **Почему:** Перезапись/дозапись последних 3 суток гарантирует отлов всех поздних изменений (late-arriving data).
+1. **Полная перезапись (dimensions, `mariadb_to_s3_dimensions`):** `users`, `plans`, `payment_systems`.
+   * Небольшие справочники (40 тыс., 48 и 5 строк), в которых правки приходят задним числом (флаги `is_tester`/`is_staff`, параметры тарифа) и нет `updated_at`. Полный снапшот в S3 с полной перезаписью таблиц `silver.stg_*` (`materialized = 'table'`) на каждом запуске гарантирует актуальное состояние без лишнего усложнения через CDC.
+2. **Гибридная загрузка для событий (`mariadb_to_s3_events`):** `payments`, `orders`, `activations`, `usage_daily`, `refunds`.
+   * **Батчи из S3** — инкрементально по high-watermark: `created_at` / `activated_at` / `usage_date` (таблица-специфичное поле задаётся в конфиге DAG-а вместе с `ch_name`), с перекрытием окна для опоздавших данных.
+   * **CDC в реальном времени** — Debezium Server → Redpanda → ClickHouse Kafka Engine + Materialized View (`cdc.*`). Ловит смену статуса платежа (`pending → success/declined`, отзыв `success → declined`), поздние досылки, апдейты и мягкие удаления (`__deleted → _is_deleted`) **за любую дату в прошлом**.
+   * Оба потока сливаются в `silver.stg_*` через `ReplacingMergeTree(_version, _is_deleted)`, поэтому порядок прихода не важен: более новое событие всегда перекрывает батч.
 
 ---
 
 ## 4. Как устроена сборка витрины
 
-Трансформация реализована в dbt (`models/gold/mrt_revenue.sql`) и запускается по расписанию `45 */4 * * *` (через 45 минут после завершения выгрузки Bronze; будет заменено на сенсор или asset-based расписание в prod):
+Цепочка dbt: `bronze.src_* / bronze.cdc.*` → `stg_*` → `int_*` → `dim_*`/`fct_*` → `mrt_revenue`.
 
-* **Дедупликация:** Перед джойном с заказами таблица `payments` очищается от дублей через конструкцию `ORDER BY loaded_at DESC LIMIT 1 BY payment_uid` (при `status = 'success'`). Это гарантирует строго 1 строку на платеж и защищает от размножения строк (row explosion).
-* **Разделение `payment` и `points`:** Заказы без `payment_uid` классифицируются как `points` с нулевой выручкой (`0.00`) и `month_since_first = 0`. Денежные заказы берут сумму и дату оплаты (`paid_at`) из `payments`.
-* **Когортный расчет:** Оконные функции (`min() over (partition by user_id)` и `row_number()`) применяются только к заказам с `source = 'payment'`, чтобы бесплатные/балловые заказы не сдвигали дату первой реальной монетизации (`first_paid_at`) и порядковый номер покупки (`purchase_number`).
+* **Дедупликация — в `silver.int_payments`.** Из `stg_payments` (уже `ReplacingMergeTree` по `_version`) остаётся по одной актуальной строке на `payment_uuid` независимо от статуса; удалённые (`_is_deleted = 1`) отбрасываются. Фильтр `payment_status = 'success'` применяется выше — в CTE `success_payments` внутри `mrt_revenue`, чтобы витрина сама решала, какой платёж считать оплатой.
+* **Разделение `payment` и `points`:** заказы без `payment_uuid` — `points` с `revenue_eur = 0.00` и `month_since_first = 0`. Денежные берут сумму и `paid_at` из `success_payments`.
+* **Когортный расчёт:** `min() over (partition by user_id)` и `row_number()` применяются только к строкам `source = 'payment'`, поэтому балловые заказы не сдвигают `first_paid_at` и `purchase_number`.
+* **Категория пакета** считается джойном с `dim_plans` по правилам `is_unlimited`/`days`/`size_gb`.
+* **Пересборка:** `int_*` обновляются инкрементально по затронутым партициям (`insert_overwrite`), а сама витрина `mrt_revenue` объявлена как `materialized = 'table'` и пересобирается **целиком** при каждом запуске. Это осознанный выбор: `first_paid_at`, `first_cohort`, `month_since_first` и `purchase_number` — оконные метрики по всей истории пользователя, и отзыв старого платежа меняет их у давно закрытых строк. Инкрементальная пересборка по `pdate` дала бы некорректные окна без пересчёта всей истории пользователя. Дедупликация при этом уже сделана в `int_*`, поэтому полная пересборка `mrt_revenue` читает чистые таблицы без `FINAL` и остаётся дешёвой; в проде эти окна выносятся в отдельную модель (см. раздел 7).
+* Запуск: `dbt build` в двух шагах (silver, затем gold) внутри `mrt_revenue_pipeline`.
 
 ---
 
 ## 5. Как проверяли правильность расчета и что нашли в данных
 
 ### Проверка корректности
-1. **Автотесты dbt (`dbt test`):** Настроены проверки `unique` и `not_null` на `order_id`, а также проверки целостности ссылок и допустимых значений (`accepted_values` для `source`).
-2. **Точечная проверка краевых кейсов:** Ручной аудит пользователей, у которых первый заказ был за баллы (`points`), а второй — за деньги (`payment`), а также проверка заказов с возвратами (`refunds`) и без них.
+1. **dbt-тесты схем (`dbt test`):** `unique` / `not_null` на `order_id` и `payment_uuid`, `relationships` на ссылочную целостность, `accepted_values` для `source` (`payment`/`points`) и `plan_category`.
+2. **Юнит-тесты dbt** (`dbt/models/gold/mrt/unit_tests.yml`): расчёт `mrt_revenue` проверяется на моках входных таблиц — кейсы «баллы → деньги», отзыв платежа, отсутствие `usage_daily`, несколько возвратов на один `payment_uuid`.
+3. **Кастомные бизнес-тесты** (`dbt/tests/`):
+   * `assert_gross_profit_math` — `gross_profit_eur = revenue_eur − cogs_eur` во всех строках;
+   * `assert_no_testers_or_staff` — в витрине нет пользователей с `is_tester = 1` или `is_staff = 1`;
+   * `assert_revenue_payment_rules` — у `source = 'payment'` есть успешный платёж, `revenue_eur > 0`, заполнены `first_paid_at` и `purchase_number`;
+   * `assert_revenue_points_rules` — у `source = 'points'` `payment_uuid` пустой, `revenue_eur = 0`, `month_since_first = 0`, `purchase_number` пустой.
 
 ### Найденные аномалии в данных
-* **Тестовые и служебные аккаунты:** В базе присутствуют заказы от пользователей с `is_tester = 1` или `is_staff = 1` — они успешно отфильтрованы на входе.
-* **Заказы без активаций/расходов:** Часть оплаченных заказов еще не имеет записей в `usage_daily` — обработано через `LEFT JOIN` и `coalesce(..., 0)` для корректного расчета `cogs_eur` и `gross_profit_eur`.
-* **Зависающие и отозванные платежи:** В сырых данных встречаются платежи, перешедшие из `success` в `declined`, а также множественные записи одного `payment_uid` в рамках 72-часового окна.
+* **Тестовые и служебные аккаунты:** заказы пользователей с `is_tester = 1` / `is_staff = 1` — отфильтрованы по текущему состоянию `users` (флаг может быть проставлен задним числом, поэтому фильтр применяется на момент сборки витрины, а не при загрузке).
+* **Заказы без активаций/расходов:** часть оплаченных заказов ещё не имеет `usage_daily` — обработано `LEFT JOIN` + `coalesce(..., 0)` для `cogs_eur` и `gross_profit_eur`.
+* **Зависающие и отозванные платежи:** встречаются переходы `success → declined` и несколько записей одного `payment_uuid` в пределах 72 часов — обработано CDC + дедупликацией в `int_payments`; отзыв платежа убирает строку из витрины через `success_payments`.
+* **Опоздавшие расходы:** `usage_daily` приходит на 1–2 дня позже — покрывается перекрытием окна батча и CDC-потоком.
 
 ---
 
 ## 6. Как это поддерживать: сбои загрузки и расхождение данных
 
-* **Если упала выгрузка (Airflow / MariaDB):**
-  * Пайплайн идемпотентен. Достаточно перезапустить упавшую таску (Clear Task) в Airflow.
+* **Если упала выгрузка (Airflow / MariaDB / S3):** пайплайн идемпотентен — достаточно Clear Task упавшей таски; повторный запуск ничего не задублирует (`ReplacingMergeTree` по `_version`).
+* **Если упал CDC:** Debezium Server хранит offset и schema history в файловом сторе (`/debezium/data`), после рестарта продолжает с последней позиции; пропущенное добирается регулярными S3-батчами.
 * **Если данные разошлись с источником:**
-  1. Запустить исторический бэкфил (Backfill) в Airflow за нужный период (или расширить окно выгрузки).
-  2. Выполнить полную пересборку зависимых моделей dbt: `dbt run --models +mrt_revenue --full-refresh && dbt test`.
+  1. Backfill в Airflow за нужный период (или расширение окна выгрузки);
+  2. `dbt build --select +mrt_revenue --full-refresh` + `dbt test` для полной пересборки зависимых моделей.
 
 ---
 
 ## 7. Что сделали бы иначе в проде и что не успели
 
-* **Инкрементальная материализация витрины:** Сейчас `mrt_revenue` пересобирается целиком (`materialized='table'`). В продакшене при росте данных до десятков миллионов строк стоит перевести модель в `incremental` с заменой партиций (`insert_overwrite` по `pdate` за последние 3–7 дней) и вынести расчет `first_paid_at` / `purchase_number` в отдельную промежуточную витрину агрегатов пользователей (`int_user_ltv_metrics`).
-* **Оркестрация через `TriggerDagRunOperator`:** Вместо жесткого сдвига расписания на 1 час (`0 1-23/4 * * *`) в проде лучше связать DAG выгрузки и DAG dbt через `Dataset` (Data-aware scheduling в Airflow 2.4+), чтобы dbt стартовал в ту же секунду, как завершится загрузка Bronze.
-* **Что не успели:** Добавить алерты в Slack/Telegram при падении `dbt test` и настроить CI/CD.
+* **Оркестрация:** asset-based связи между DAG-ами уже реализованы (`common/assets.py`); в проде добавил бы сенсоры на появление объектов в S3 и алерты в Slack/Telegram при падении `dbt test`.
+* **Отказоустойчивость инфраструктуры:** в проде одиночный брокер Redpanda заменяется на кластер Kafka/Redpanda с репликацией (RF=3) и Schema Registry, а одиночный инстанс ClickHouse — на реплицируемый кластер (ReplicatedMergeTree). Также добавляется мониторинг лага консьюмеров (consumer lag).
+* **Витрина:** при росте до десятков миллионов строк — вынести `first_paid_at` / `purchase_number` в отдельную intermediate-модель агрегатов пользователей (`int_user_ltv_metrics`) и пересобирать `mrt_revenue` инкрементально по `pdate`, а не целиком, чтобы не пересчитывать окна по всей истории на каждом запуске.
+* **Не успели:** CI/CD (линт SQL + `dbt build --empty` в PR), мониторинг свежести (`dbt source freshness` с алертами — на стенде с имитацией времени через батчи он неактуален, но обязателен в проде), жёсткие dbt Model Contracts (`enforced: true`) на витринах `gold` и IaC для ClickHouse.
+
 
 ---
 
 ## 8. Сколько времени ушло
 
-* **Проектирование архитектуры, DDL и настройка окружения:** ~4 часа.
-* **Разработка Airflow DAG и логики инкрементальной выгрузки (Bronze):** ~2 часа.
-* **Написание dbt-моделей (Silver/Gold), отладка инфраструктуры и логики когорт:** ~4 часа.
-* **Тестирование, сверка с источником, выгрузка CSV и написание документации:** ~4 часа.
-* **Итого:** ~14 часов.
+* **Проектирование архитектуры, DDL и настройка окружения:** ~6 часов.
+* **Разработка Airflow DAG, Assets и логики инкрементальной выгрузки в S3:** ~6 часа.
+* **CDC-контур (Debezium → Redpanda → ClickHouse Kafka Engine + MV):** ~4 часа.
+* **dbt-модели (bronze/silver/int/gold), макрос `get_cdc_watermarks`, `insert_overwrite`:** ~5 часов.
+* **Тесты (схемы, юнит, бизнес-ассерты), сверка с источником, CSV, документация:** ~4 часа.
+* **Итого:** ~25 часов.

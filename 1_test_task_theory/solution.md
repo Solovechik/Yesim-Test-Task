@@ -17,7 +17,7 @@
 * **Which layer is the current source of truth today** for `prd_07` (snapshot_date), `prd_08` (valid_from) and `prd_10` (SummingMergeTree) — MariaDB, application writes, or ClickHouse-side aggregation?
 
 ##### 5. Security, PII & Access Governance
-* **PII & Compliance Constraints**: Which specific columns in `usr_01` and transactional logs contain Personally Identifiable Information (emails, IPs, names), and what is the required anonymization policy (hashing vs. masking vs. role-based column restrictions) before exposing data to BI tools (if not handled beforehand)? Note this must also cover the raw S3 layer, where Parquet files retain payloads verbatim.
+* **PII & Compliance Constraints**: Which specific columns in `usr_01` and transactional logs contain Personally Identifiable Information (emails, IPs, names), and what is the required anonymization policy (hashing vs. masking vs. role-based column restrictions) before exposing data to BI tools? This must also cover the raw S3 layer, where Parquet files retain payloads verbatim.
 * **Consumer Profiles & Concurrency:** Who are the primary consumers of the gold layer (number of BI dashboard viewers vs. ad-hoc SQL analysts), and what are the peak concurrency expectations during business hours?
 
 
@@ -57,13 +57,16 @@
 *Note:* `prd_05` (67.6 M rows / 30.5 GB) and `prd_09` (22.4 M / 12.2 GB) are the largest tables with **no ClickHouse counterpart today** — they are net-new ingestion, not a migration.
 
 **How:**
-* ***Problem:*** 149 of 152 base tables (98%) completely lack an `updated_at` column — and, critically, **none of the 20 largest tables has one**. If an existing record (e.g., a user profile in `usr_01`) is updated in place, its primary key (`id`) and creation timestamp remain unchanged. A standard high-watermark query (`WHERE id > :last_max_id`) will completely miss this update.
-* ***Cheap (no mutation is guaranteed):*** For append-only event logs, standard high-watermark pagination by id or event date is used. For mutable entity tables without `updated_at`, we rely on partition/date-range sliding windows (periodically resyncing active partitions, e.g. the last 3–7 days) combined with deduplication on write in the Silver layer.
-* ***Reconciliation for P0 mutable tables (required):*** large mutable entities (`prd_03`, `prd_05`, `usr_01`, `mkt_01`) cannot be covered by a 7-day window alone, because updates routinely land weeks after creation. A weekly id-range checksum comparison (`CHECKSUM TABLE` per range, or `SUM(CRC32(CONCAT_WS(...)))` over 1 M-row PK slices) against the last known snapshot produces the list of changed ranges, which are then re-extracted and overwritten partition-wise. No full-table scan is needed on either side.
-* ***Extraction mechanics:*** every task first asserts replica health (`SHOW REPLICA STATUS` → `Seconds_Behind_Source` below threshold, replication thread running) and aborts without writing if the replica lags. Reads are chunked by primary-key ranges (bounded `WHERE id BETWEEN …`, no long-lived transactions), run under `--single-transaction` semantics, and are throttled so that extraction never saturates the replica.
-* ***Delete handling:*** hard deletes are undetectable via high-watermarks. Bronze keeps append-only history; Silver resolves the current state with a `ReplacingMergeTree(is_deleted)` marker or a periodic anti-join against the replica for P0 tables, so deleted entities disappear from gold marts.
-* ***Expensive (100% change capture):*** CDC + Kafka by tailing the MariaDB binary log (binlog), once `binlog_format=ROW` is enabled — the strategic target for P0 tables.
-* ***Schema drift:*** each run snapshots `INFORMATION_SCHEMA.COLUMNS` for the extracted tables into S3 (`_schema/{table}/{run}.json`) and diffs it against the previous snapshot. Added/renamed/dropped columns fail the task loudly instead of silently shifting `SELECT *` output.
+**1. Change Capture Strategy (Incremental & Reconciliation):**
+* ***The Problem:*** 149 of 152 base tables (98%) completely lack an `updated_at` column — and, critically, **none of the 20 largest tables has one**. If an existing record (e.g., a user profile in `usr_01`) is updated in place, its primary key (`id`) and creation timestamp remain unchanged. A standard high-watermark query (`WHERE id > :last_max_id`) will completely miss this update.
+* ***Cheap (Baseline Incremental):*** For append-only event logs, standard high-watermark pagination by `id` or event date is used. For mutable entity tables without `updated_at`, we rely on partition/date-range sliding windows (periodically resyncing active partitions over the last 3–7 days) combined with write-time deduplication in the Silver layer.
+* ***Reconciliation for P0 Mutable Tables (Required):*** Large mutable entities (`prd_03`, `prd_05`, `usr_01`, `mkt_01`) cannot be covered by a 7-day window alone, because updates routinely land weeks after creation. A weekly `id`-range checksum comparison (`CHECKSUM TABLE` per range, or `SUM(CRC32(CONCAT_WS(...)))` over 1 M-row PK slices) against the last known snapshot produces the list of changed ranges, which are then re-extracted and overwritten partition-wise without a full-table scan on either side.
+* ***Expensive (Strategic Target for P0):*** 100% change capture via CDC + Kafka by tailing the MariaDB binary log (`binlog_format=ROW`) once enabled upstream.
+
+**2. Replica Protection & Extraction Integrity:**
+* ***Extraction Mechanics:*** Every task first asserts replica health (`SHOW REPLICA STATUS` → `Seconds_Behind_Source` below threshold, replication thread running) and aborts without writing if the replica lags. Reads are chunked by primary-key ranges (bounded `WHERE id BETWEEN …`, no long-lived transactions), run under `--single-transaction` semantics, and are throttled so that extraction never saturates the replica.
+* ***Delete Handling:*** Hard deletes are undetectable via high-watermarks. Bronze keeps append-only history; Silver resolves the current state with a `ReplacingMergeTree(is_deleted)` marker or a periodic anti-join against the replica for P0 tables, so deleted entities disappear from gold marts.
+* ***Schema Drift:*** Each run snapshots `INFORMATION_SCHEMA.COLUMNS` for the extracted tables into S3 (`_schema/{table}/{run}.json`) and diffs it against the previous snapshot. Added, renamed, or dropped columns trigger an alert instead of silently shifting `SELECT *` output.
 <br>
 
 ##### ClickHouse-native sources
@@ -105,8 +108,8 @@
 ## 2. Orchestration & Reliability (Apache Airflow)
 **What:** Centralized workflow orchestration using Apache Airflow, managing the execution DAGs, task dependencies, and schedules across all ingestion and transformation pipelines.
 **How:**
-* ***Idempotency:*** Each run writes an immutable Parquet/JSONL file named after its scheduled interval inside a date-partitioned S3 path (e.g., `s3://dwh-datalake/raw/{source}/{table}/date={{ ds }}/batch_{{ data_interval_start.strftime('%H%M') }}.parquet`). Because data_interval_start remains fixed across task retries, re-running a failed job safely overwrites the exact same target file without creating duplicates or data drift.
-* ***Retries & Exponential Backoff:*** Tasks are configured with automatic retries (e.g., retries=3, retry_delay=5 minutes with exponential backoff) to gracefully handle transient network glitches, API rate limits, or momentary drops in the MariaDB replica connection.
+* ***Idempotency:*** Each run writes an immutable Parquet/JSONL file named after its scheduled interval inside a date-partitioned S3 path (e.g., `s3://dwh-datalake/raw/{source}/{table}/date={{ ds }}/batch_{{ data_interval_start.strftime('%H%M') }}.parquet`). Because `data_interval_start` remains fixed across task retries, re-running a failed job safely overwrites the exact same target file without creating duplicates or data drift.
+* ***Retries & Exponential Backoff:*** Tasks are configured with automatic retries (e.g., `retries=3`, `retry_delay=5 minutes` with exponential backoff) to gracefully handle transient network glitches, API rate limits, or momentary drops in the MariaDB replica connection.
 * ***Replica & Source Guards:*** A `check_source_health` task runs before extraction and fails the run if replica lag exceeds the threshold, binlog position is stale, or an upstream API returns a quota error — preventing partial/garbage batches from being staged.
 * ***Data Quality & Volume Alerts:*** Automated checks (via dbt tests and custom Python operators). If a newly ingested batch contains 0 rows or if row count drops by more than 50% compared to the historical weekly average, the pipeline fails and immediately triggers an alert.
 * ***Alerting & Incident Management:*** Critical pipeline failures and SLA breaches send automated notifications to the Data Engineering team's Telegram/Slack channel via Airflow `on_failure_callback`, containing the DAG ID, task name, and error logs for fast troubleshooting.
@@ -135,11 +138,11 @@
 
 * ***Silver Layer (Cleaned, Typed & Deduplicated):***
     * *Purpose:* Standardized schemas, explicit data types, timezone normalization (UTC), and entity deduplication.
-    * *Deduplication is resolved at write time, not at read time:* ReplacingMergeTree only collapses duplicates **during background merges** — a query issued before the merge (and any consumer that omits `FINAL`) will happily read duplicates, which is exactly the failure visible in the current warehouse, where several `ReplacingMergeTree ORDER BY id` tables hold more rows than their MariaDB source (`mkt_03` +651%, `msg_01` +82%, `mkt_02` +41%, `usr_01` +8%, and conversely `usr_03` −2%). Therefore each incremental Silver model writes a **deterministic one-row-per-key result** using ClickHouse-native `argMax(col, version) GROUP BY id` or `LIMIT 1 BY id` inside the model, and applies `insert_overwrite` per affected partition. Downstream reads then need neither `FINAL` nor a lucky merge schedule, and `ReplacingMergeTree(version_col)` is kept only as a safety net for late-arriving duplicates.
-    * *History Tracking:* To handle business requirements for point-in-time historical analysis (e.g., tracking user plan changes or status transitions over time), SCD2 is derived from the append-only Bronze trail with the same `valid_from`/`valid_to` convention already used by the existing `prd_08` table. Native `dbt snapshot` is reserved for narrow dimensions (well under 5 M rows), because a snapshot against a 50 M+ row entity re-scans the entire table on every run.
+    * *Deduplication is resolved at write time, not at read time:* ReplacingMergeTree only collapses duplicates **during background merges** — a query issued before the merge (and any consumer that omits `FINAL`) will happily read duplicates, which is exactly the failure visible in the current warehouse, where several `ReplacingMergeTree ORDER BY id` tables hold more rows than their MariaDB source (`mkt_03` +651%, `msg_01` +82%, `mkt_02` +41%, `usr_01` +8%, and conversely `usr_03` −2%). Therefore each incremental Silver model writes a **deterministic one-row-per-key result** using ClickHouse-native `argMax(col, version) GROUP BY id` or `LIMIT 1 BY id` inside the model, and applies `insert_overwrite` per affected partition, so downstream reads need neither `FINAL` nor a lucky merge schedule. In the prototype (in the repository) this principle is implemented as `stg_*` tables on `ReplacingMergeTree(_version, _is_deleted)` combined with incremental rebuilds of only the changed partitions in `int_*` tables on plain `MergeTree` (`insert_overwrite` + `FINAL` + `_is_deleted = 0`), with batch watermarks and CDC offsets tracked via the `get_cdc_watermarks` macro.
+    * *History Tracking:* To handle business requirements for point-in-time historical analysis (e.g., tracking user plan changes or status transitions over time), SCD2 is derived from the append-only Bronze trail using the `valid_from`/`valid_to` convention adopted in the existing `prd_08` table. Native `dbt snapshot` is reserved for narrow dimensions (well under 5 M rows), because a snapshot against a 50 M+ row entity re-scans the entire table on every run.
 
 * ***Gold Layer (Internal Pre-Aggregations):***
-    * *Purpose:* Hidden service layer storing intermediate pre-aggregated states (SummingMergeTree, AggregatingMergeTree, separate tables of Merge engine) — an extension of the pattern already present in `prd_10`.
+    * *Purpose:* Hidden service layer storing intermediate pre-aggregated states (SummingMergeTree, AggregatingMergeTree, separate tables using the Merge engine) — an extension of the pattern already present in `prd_10`.
     * *Isolation & Safety:* Intentionally hidden from end consumers and BI tools via RBAC. Working directly with AggregatingMergeTree state columns (AggregateFunction) requires specialized ClickHouse syntax (-State / -Merge combinators) and deep awareness of background merge mechanics. Isolating these datasets in `gold_agg` prevents non-technical users and analysts from querying raw intermediate states and misinterpreting unmerged metrics.
 
 * ***Gold Layer (Business Marts)***:
@@ -175,7 +178,7 @@
 **Why:** Prevents business analysts and BI tools from accidentally querying raw ingestion logs (bronze) or unmerged AggregateFunction states (gold_agg), eliminating miscalculated metrics and heavy unoptimized full-table scans.
 **How:**
 * Grant read permissions only on the consumer-facing gold schema (`GRANT SELECT ON gold.*`) for BI service accounts and analysts.
-* Do not grant any access to bronze, silver, and gold_agg for non-engineering roles. Note that ClickHouse cannot hide database *names* from users — only their contents — so isolation is enforced by grants plus `readonly = 1/2` profiles, not by expecting schemas to be invisible.
+* Do not grant any access to bronze, silver, and gold_agg for non-engineering roles. ClickHouse cannot hide database *names* from users — only their contents — so isolation is enforced by grants plus `readonly = 1/2` profiles, not by expecting schemas to be invisible.
 * Enforce query resource profiles (`max_memory_usage`, `max_execution_time`, `max_concurrent_queries_for_user`) on ad-hoc user profiles to isolate production dbt pipelines from user query spikes.
 <br>
 
@@ -214,7 +217,7 @@
 
 **Weeks 3–4 — dbt Integration & Silver Layer:**
 * Configure dbt-clickhouse project structure and CI/CD pipelines.
-* Implement incremental Silver models using insert_overwrite, sliding window reloads, and deterministic write-time deduplication (`argMax` / `LIMIT 1 BY id`), so no consumer depends on `FINAL`.
+* Implement incremental Silver models using `insert_overwrite`, sliding window reloads, and deterministic write-time deduplication (`FINAL` over `ReplacingMergeTree` or `argMax` / `LIMIT 1 BY id` when rebuilding partitions into plain `MergeTree`), so no downstream Gold consumer depends on `FINAL`.
 * Implement the weekly PK-range checksum reconciliation for the four largest mutable tables.
 * Configure the `valid_from`/`valid_to` SCD2 pattern derived from Bronze for critical entities; use `dbt snapshot` only for narrow dimensions. Set up baseline dbt tests (unique, not_null).
 
